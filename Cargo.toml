@@ -1,0 +1,9 @@
+[package]
+name = "knockr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+notify-rust = "4.18.0"
+reqwest = { version = "0.13.4", features = ["blocking"] }
