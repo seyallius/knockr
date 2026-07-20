@@ -2,7 +2,35 @@ mod notify;
 
 use anyhow::Result;
 use reqwest::blocking::Client;
-use std::{cmp, thread, time::{Duration, Instant}};
+use std::{
+    cmp, thread,
+    time::{Duration, Instant},
+};
+
+/// -------- CUSTOMISE THIS FUNCTION --------
+/// Returns true if the response is considered "successful".
+/// Default: anything except 504 is good.
+/// For alibaba.ir, we also check that the error message is NOT present.
+fn is_success(status: u16, body: &str) -> bool {
+    // 1. Gateway timeout → definitely not ready
+    if status == 504 {
+        return false;
+    }
+
+    // 2. Anything not 200-300 range -> definitely not ready
+    if status < 200 && status > 400 {
+        return false;
+    }
+
+    // 3. message-specific: if the body contains the error message,
+    //    treat it as "still unavailable" even though status is 200.
+    if body.contains("<some_message>") {
+        return false;
+    }
+
+    // 4. Everything else → success (you can tighten this to `status == 200` if you want)
+    true
+}
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -18,56 +46,50 @@ fn main() -> Result<()> {
     const MAX_BACKOFF: Duration = Duration::from_secs(60);
 
     println!("🔍 Monitoring {} until it becomes available...", url);
-    println!("(Will notify when status is NOT 504)\n");
+    println!("(Will notify when condition is met)\n");
 
     let start = Instant::now();
 
     loop {
+        println!();
+        println!("Requesting URL: <{url}>");
         let response = client.get(url).send();
 
         match response {
             Ok(resp) => {
                 let status = resp.status().as_u16();
+                // Read the body (we need it for alibaba's check)
+                let body = match resp.text() {
+                    Ok(t) => t,
+                    Err(e) => {
+                        println!("[Error reading body] {}", e);
+                        // If we can't read the body, treat as failure (retry)
+                        thread::sleep(backoff);
+                        backoff = cmp::min(backoff * 2, MAX_BACKOFF);
+                        continue;
+                    }
+                };
+
                 println!("[{:.1}s] Status: {}", start.elapsed().as_secs_f64(), status);
 
-                // ----- CHANGE THIS CONDITION AS NEEDED -----
-                // Option 1: break on ANY non‑504 (default)
-                if status != 504 {
-                    loop {
-                        notify::notify("Server is back!", &format!("Status: {}", status));
-                        println!("🎉 Server responded with {}. Exiting.", status);
-                        thread::sleep(Duration::from_secs(5))
+                if is_success(status, &body) {
+                    for _ in 0..5 {
+                        notify::notify(
+                            &format!("🎉 Knockr: Server [{url}] is back!"),
+                            &format!("Status: {}", status),
+                        );
+                        println!("✅ Success condition met. Exiting.");
                         // return Ok(());
                     }
                 }
-
-                // Option 2: break ONLY on 200 OK (uncomment and comment the above)
-                /*
-                if status == 200 {
-                    loop {
-                        notify::notify("Server is back!", &format!("Status: {}", status));
-                        println!("✅ Server returned 200 OK. Exiting.");
-                        thread::sleep(Duration::from_secs(5))
-                        // return Ok(());
-                    }
-                }
-                */
-
-                // Option 3: break on any 2xx or 3xx
-                /*
-                if status >= 200 && status < 400 {
-                    notify(&format!("Server is back!"), &format!("Status: {}", status));
-                    println!("✅ Server returned {}. Exiting.", status);
-                    return Ok(());
-                }
-                */
             }
             Err(e) => {
-                println!("[Error] {}", e);
+                eprintln!("[Error] {}", e);
             }
         }
 
-        // Still 504 (or error) – wait with exponential backoff
+        // Still not successful – wait with exponential backoff
+        println!("Will wait {:?} before next retry", backoff);
         thread::sleep(backoff);
         backoff = cmp::min(backoff * 2, MAX_BACKOFF);
     }
