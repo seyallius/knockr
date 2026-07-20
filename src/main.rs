@@ -33,17 +33,23 @@ fn main() -> Result<()> {
                 // ----- CHANGE THIS CONDITION AS NEEDED -----
                 // Option 1: break on ANY non‑504 (default)
                 if status != 504 {
-                    notify::notify("Server is back!", &format!("Status: {}", status));
-                    println!("🎉 Server responded with {}. Exiting.", status);
-                    return Ok(());
+                    loop {
+                        notify::notify("Server is back!", &format!("Status: {}", status));
+                        println!("🎉 Server responded with {}. Exiting.", status);
+                        thread::sleep(Duration::from_secs(5))
+                        // return Ok(());
+                    }
                 }
 
                 // Option 2: break ONLY on 200 OK (uncomment and comment the above)
                 /*
                 if status == 200 {
-                    notify::notify("Server is back!", &format!("Status: {}", status));
-                    println!("✅ Server returned 200 OK. Exiting.");
-                    return Ok(());
+                    loop {
+                        notify::notify("Server is back!", &format!("Status: {}", status));
+                        println!("✅ Server returned 200 OK. Exiting.");
+                        thread::sleep(Duration::from_secs(5))
+                        // return Ok(());
+                    }
                 }
                 */
 
